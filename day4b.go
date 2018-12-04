@@ -123,16 +123,16 @@ func main() {
 		}
 	}
 
-	var maxMinutesGuard *GuardInfo
-	maxMinutes := 0
+	var maxGuard *GuardInfo
+	maxMinute, maxTimes := 0, 0
 	for _, g := range guards {
-		if g.total > maxMinutes {
-			maxMinutes = g.total
-			maxMinutesGuard = g
+		m, t := g.getMaxMinute()
+		if t > maxTimes {
+			maxTimes = t
+			maxMinute = m
+			maxGuard = g
 		}
 	}
 
-	maxMinute, _ := maxMinutesGuard.getMaxMinute()
-
-	fmt.Printf("#%d %d/%d %d\n", maxMinutesGuard.id, maxMinutesGuard.total, maxMinute, maxMinute*maxMinutesGuard.id)
+	fmt.Printf("#%d %d/:%d %d\n", maxGuard.id, maxTimes, maxMinute, maxMinute*maxGuard.id)
 }
