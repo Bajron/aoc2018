@@ -25,7 +25,7 @@ func NewArena(x0, y0, x1, y1) *Arena {
     h := y1 - y0 + 1
     arena := make([]Grain, w*h) 
     for _, g := range arena {
-        g = -1
+        g = Grain{w*h, -1}
     }
     return &Arena{x0,y0, x1, y1, arena}
 }
@@ -43,12 +43,16 @@ func (arena *Arena) set(pos Point, owner, distance int) {
     return
 }
 
-
-func (arena *Arena) put(pos Point, id int, distance int) (claimed int) {
+func (arena *Arena) tryPut(pos Point, id int, distance int) (claimed int) {
     grain := arena.at(pos)
-    if grain.owner == -1 {
-        
+    if grain.owner == -1 || grain.distance > distance {
+        arena.set(pos, id, distance)
+    } else if grain.distance == distance && grain.owner != id {
+        arena.set(pos, -2, distance)
     }
+    
+    claimed = arena.at(pos).owner
+    return
 }
 
 type FloodState {
