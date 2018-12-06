@@ -62,6 +62,22 @@ func (arena *Arena) FillAll(points []Point) {
 	return
 }
 
+func (arena *Arena) SumAll(points []Point) {
+	for gi := range arena.grains {
+		arena.grains[gi].distance = 0
+	}
+
+	for _, p := range points {
+		for x := arena.x0; x <= arena.x1; x++ {
+			for y := arena.y0; y <= arena.y1; y++ {
+				distance := abs(p.x-x) + abs(p.y-y)
+				arena.grains[arena.translate(Point{x, y})].distance += distance
+			}
+		}
+	}
+	return
+}
+
 func (arena Arena) CountFields() map[int]int {
 	ret := make(map[int]int)
 	inf := arena.findInfinite()
@@ -148,24 +164,14 @@ func main() {
 	}
 
 	arena := NewArena(x0, y0, x1, y1)
-	arena.FillAll(points)
-	counts := arena.CountFields()
+	arena.SumAll(points)
 
-	// for y := arena.y0; y <= arena.y1; y++ {
-	// for x := arena.x0; x <= arena.x1; x++ {
-	// fmt.Fprintf(stderr, "%3d ", arena.at(Point{x,y}).owner)
-	// }
-	// fmt.Fprintf(stderr, "\n")
-	// }
-
-	maxCount := 0
-	maxId := -1
-	for id, c := range counts {
-		if c > maxCount {
-			maxId = id
-			maxCount = c
+	count := 0
+	for _, g := range arena.grains {
+		if g.distance < 10000 {
+			count++
 		}
 	}
 
-	fmt.Printf("#%d %d\n", maxId, maxCount)
+	fmt.Printf("#region %d\n", count)
 }
