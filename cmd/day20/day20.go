@@ -6,10 +6,13 @@ import (
 	"os"
 )
 
+type Rope []*string
+
 type Node struct {
-	text     string
-	kind     byte
-	children []*Node
+	text             string
+	kind             byte
+	children         []*Node
+	generatedStrings []Rope
 }
 
 func MaxLen(node *Node) int {
@@ -66,21 +69,95 @@ func Move(p Point, direction byte) Point {
 	panic("bad direction " + string(direction))
 }
 
-func FindDoors(node *Node, pos Point, doors *[]Door) []Point {
+// func GenerateStrings(node *Node) []string {
+// 	if node.generatedStrings != nil {
+// 		return node.generatedStrings
+// 	}
+
+// 	if len(node.children) == 0 {
+// 		fmt.Printf("generating leaf %s\n", node.text)
+// 		node.generatedStrings = []string{node.text}
+// 		return node.generatedStrings
+// 	}
+
+// 	if node.text == "()" {
+// 		generated := make([]string, 0, 1000)
+// 		for _, ch := range node.children {
+// 			strs := GenerateStrings(ch)
+// 			for _, s := range strs {
+// 				generated = append(generated, s)
+// 			}
+// 		}
+// 		node.generatedStrings = generated
+// 		fmt.Printf("produced () %d\n", len(node.generatedStrings))
+// 		return node.generatedStrings
+// 	}
+
+// 	starts := []string{""}
+// 	nextStarts := []string{}
+// 	for _, ch := range node.children {
+// 		nextStarts := nextStarts[:0]
+// 		tmp := GenerateStrings(ch)
+// 		for _, s := range starts {
+// 			for _, d := range tmp {
+// 				nextStarts = append(nextStarts, s+d)
+// 			}
+// 		}
+// 		starts, nextStarts = nextStarts, starts
+// 	}
+// 	node.generatedStrings = starts
+// 	fmt.Printf("produced , %d\n", len(node.generatedStrings))
+// 	return node.generatedStrings
+// }
+
+func GenerateSize(node *Node) int {
+	if len(node.children) == 0 {
+		return 1
+	}
+
+	if node.text == "()" {
+		ret := 0
+		for _, ch := range node.children {
+			ret += GenerateSize(ch)
+		}
+		return ret
+	}
+
+	ret := 1
+	for _, ch := range node.children {
+		ret *= GenerateSize(ch)
+	}
+	return ret
+}
+
+func FindDoors(node *Node, pos Point, doors *map[int]map[int]bool) []Point {
 
 	if len(node.children) == 0 {
 		prev := pos
 		for i := range node.text {
 			pos = Move(pos, node.text[i])
-			*doors = append(*doors, Door{prev, pos})
+			pr := Gnode(prev)
+			po := Gnode(pos)
+			//*doors = append(*doors, Door{prev, pos})
+
+			if _, ok := (*doors)[pr]; !ok {
+				(*doors)[pr] = map[int]bool{}
+			}
+			if _, ok := (*doors)[po]; !ok {
+				(*doors)[po] = map[int]bool{}
+			}
+
+			(*doors)[pr][po] = true
+			(*doors)[po][pr] = true
 			prev = pos
 		}
 
+		//fmt.Printf(" doors now %d \n", len(*doors))
 		return []Point{prev}
 	}
 
 	if node.text == "()" {
-		finishes := []Point{}
+		finishes := make([]Point, 0, 1000)
 		for _, ch := range node.children {
 			f := FindDoors(ch, pos, doors)
 			for _, d := range f {
@@ -92,14 +169,19 @@ func FindDoors(node *Node, pos Point, doors *[]Door) []Point {
 
 	starts := []Point{pos}
 	for _, ch := range node.children {
-		nextStarts := []Point{}
+		nextStarts := map[Point]bool{}
 		for _, s := range starts {
 			tmp := FindDoors(ch, s, doors)
 			for _, d := range tmp {
-				nextStarts = append(nextStarts, d)
+				if d != pos {
+					nextStarts[d] = true
+				}
 			}
 		}
-		starts = nextStarts
+		starts = starts[:0]
+		for p := range nextStarts {
+			starts = append(starts, p)
+		}
 	}
 	return starts
 }
@@ -116,7 +198,7 @@ func main() {
 
 	stdin := bufio.NewReader(os.Stdin)
 
-	root := Node{"", '$', []*Node{}}
+	root := Node{"", '$', []*Node{}, nil}
 	stack := []*Node{}
 	sp := -1
 	text := ""
@@ -137,18 +219,18 @@ func main() {
 
 		if b == '(' {
 			if len(text) > 0 {
-				stack[sp].children = append(stack[sp].children, &Node{text, 'a', []*Node{}})
+				stack[sp].children = append(stack[sp].children, &Node{text, 'a', []*Node{}, nil})
 				text = ""
 			}
-			stack = append(stack, &Node{"()", '(', []*Node{}})
+			stack = append(stack, &Node{"()", '(', []*Node{}, nil})
 			sp++
 
-			stack = append(stack, &Node{"", ',', []*Node{}})
+			stack = append(stack, &Node{"", ',', []*Node{}, nil})
 			sp++
 		}
 		if b == '|' {
 			if len(text) > 0 {
-				stack[sp].children = append(stack[sp].children, &Node{text, 'a', []*Node{}})
+				stack[sp].children = append(stack[sp].children, &Node{text, 'a', []*Node{}, nil})
 				text = ""
 			}
 
@@ -158,12 +240,12 @@ func main() {
 			sp--
 			stack[sp].children = append(stack[sp].children, finished)
 
-			stack = append(stack, &Node{"", ',', []*Node{}})
+			stack = append(stack, &Node{"", ',', []*Node{}, nil})
 			sp++
 		}
 		if b == ')' || b == '$' {
 			if len(text) > 0 {
-				stack[sp].children = append(stack[sp].children, &Node{text, 'a', []*Node{}})
+				stack[sp].children = append(stack[sp].children, &Node{text, 'a', []*Node{}, nil})
 				text = ""
 			}
 
@@ -189,26 +271,22 @@ func main() {
 
 	//Dump(&root, "")
 
-	doors := []Door{}
+	doors := map[int]map[int]bool{}
+
+	//strs := GenerateStrings(&root)
+	fmt.Printf("generated set count %d\n", GenerateSize(&root))
+	// for i, s := range strs {
+	// 	fmt.Printf("%d: %s\n", i, s)
+	// }
+
+	//doors := []Door{}
 	FindDoors(&root, Point{0, 0}, &doors)
-	fmt.Printf("doors %d / %v\n", len(doors), doors)
+	//fmt.Printf("doors %d / %v\n", len(doors), doors)
 
 	gnodes := map[int]bool{}
-	edges := map[int]map[int]bool{}
-	for _, d := range doors {
-		f := Gnode(d.from)
-		t := Gnode(d.to)
-		gnodes[f] = true
-		gnodes[t] = true
-		if _, ok := edges[f]; !ok {
-			edges[f] = map[int]bool{}
-		}
-		if _, ok := edges[t]; !ok {
-			edges[t] = map[int]bool{}
-		}
-
-		edges[f][t] = true
-		edges[t][f] = true
+	edges := doors
+	for from := range edges {
+		gnodes[from] = true
 	}
 
 	startingGnode := Gnode(Point{0, 0})
@@ -237,14 +315,19 @@ func main() {
 		wave = newWave
 	}
 
+	atLeast1000 := 0
 	rm, dm := -1, 0
 	for room, maxDistance := range best {
 		if maxDistance > dm {
 			dm = maxDistance
 			rm = room
 		}
+		if maxDistance >= 1000 {
+			atLeast1000++
+		}
 	}
 
 	fmt.Printf("best %v\n", best)
 	fmt.Printf("furthest room %d, with distance %d\n", rm, dm)
+	fmt.Printf("at least 1000 %d\n", atLeast1000)
 }
