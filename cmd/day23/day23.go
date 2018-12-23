@@ -4,10 +4,15 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"sort"
 )
 
 type Point struct {
 	x, y, z int
+}
+
+func (p Point) add(a Point) Point {
+	return Point{p.x + a.x, p.y + a.y, p.z + a.z}
 }
 
 type Bot struct {
@@ -34,6 +39,18 @@ func sign(x int) int {
 		return 1
 	}
 	return 0
+}
+
+func sortUnique(c []int) []int {
+	r := make([]int, 0, cap(c))
+	sort.Ints(c)
+	r = append(r, c[0])
+	for i := 1; i < len(c); i++ {
+		if r[len(r)-1] != c[i] {
+			r = append(r, c[i])
+		}
+	}
+	return r
 }
 
 func main() {
@@ -114,8 +131,25 @@ func main() {
 		fmt.Printf("%d is seen by %d\n", bi, visible)
 	}
 
+	crosser := -1
+	crossingCount := 0
+	for bi, bref := range bots {
+		crossings := 0
+		for _, b := range bots {
+			if dist(bref.location, b.location) <= b.radius+bref.radius {
+				crossings++
+			}
+		}
+		if crossings > crossingCount {
+			crossingCount = crossings
+			crosser = bi
+		}
+		fmt.Printf("%d is crosses with by %d\n", bi, crossings)
+	}
+
 	fmt.Printf("best beacon %v at index %d best %d\n", bots[beacon], beacon, beaconVisible)
 	fmt.Printf("best receiver %v at index %d best %d\n", bots[receiver], receiver, receiverVisible)
+	fmt.Printf("best crosser %v at index %d best %d\n", bots[crosser], crosser, crossingCount)
 
 	minx, maxx, miny, maxy, minz, maxz := 2000000000, -2000000000, 2000000000, -2000000000, 2000000000, -2000000000
 	for _, b := range bots {
@@ -140,8 +174,52 @@ func main() {
 	}
 
 	zero := Point{0, 0, 0}
+
 	best := 0
 	candidate := Point{0, 0, 0}
+
+	interesting := []Point{}
+
+	interestingX := []int{}
+	interestingY := []int{}
+	interestingZ := []int{}
+	for _, b := range bots {
+		interestingX = append(interestingX, b.location.x, b.location.x-b.radius, b.location.x+b.radius)
+		interestingY = append(interestingY, b.location.y, b.location.y-b.radius, b.location.y+b.radius)
+		interestingZ = append(interestingZ, b.location.z, b.location.z-b.radius, b.location.z+b.radius)
+
+		interesting = append(interesting, b.location)
+		interesting = append(interesting, b.location.add(Point{1, 0, 0}))
+		interesting = append(interesting, b.location.add(Point{-1, 0, 0}))
+		interesting = append(interesting, b.location.add(Point{0, 1, 0}))
+		interesting = append(interesting, b.location.add(Point{0, -1, 0}))
+		interesting = append(interesting, b.location.add(Point{0, 0, 1}))
+		interesting = append(interesting, b.location.add(Point{0, 0, -1}))
+	}
+	interestingX = sortUnique(interestingX)
+	interestingY = sortUnique(interestingY)
+	interestingZ = sortUnique(interestingZ)
+
+	fmt.Printf("eh %d %d %d\n", len(interestingX), len(interestingY), len(interestingZ))
+
+	for _, c := range interesting {
+		visible := 0
+		for _, b := range bots {
+			if dist(c, b.location) <= b.radius {
+				visible++
+			}
+		}
+		if visible > best || (visible == best && dist(c, zero) < dist(candidate, zero)) {
+			candidate = c
+			best = visible
+
+			fmt.Printf("something %v  best %d \n", candidate, best)
+		}
+
+	}
+
+	best = 0
+	candidate = Point{0, 0, 0}
 
 	grain := 100
 	for i := 0; i < 20; i++ {
@@ -174,9 +252,9 @@ func main() {
 				}
 			}
 		}
-		minx, maxx = candidate.x-25*dx, candidate.x+25*dx
-		miny, maxy = candidate.y-25*dy, candidate.y+25*dy
-		minz, maxz = candidate.z-25*dz, candidate.z+25*dz
+		minx, maxx = candidate.x-33*dx, candidate.x+33*dx
+		miny, maxy = candidate.y-33*dy, candidate.y+33*dy
+		minz, maxz = candidate.z-33*dz, candidate.z+33*dz
 
 		fmt.Printf("%d: grid lookup %v  best %d (%d,%d,%d)\n", i, candidate, best, dx, dy, dz)
 	}
@@ -184,9 +262,9 @@ func main() {
 	fmt.Printf("grid lookup %v  best %d\n", candidate, best)
 
 	for j := 0; j < 10; j++ {
-		minx, maxx = candidate.x-20000, candidate.x+20000
-		miny, maxy = candidate.y-20000, candidate.y+20000
-		minz, maxz = candidate.z-20000, candidate.z+20000
+		minx, maxx = candidate.x-150000, candidate.x+150000
+		miny, maxy = candidate.y-150000, candidate.y+150000
+		minz, maxz = candidate.z-150000, candidate.z+150000
 
 		for i := 0; i < 20; i++ {
 			dx, dy, dz := (maxx-minx)/grain, (maxy-miny)/grain, (maxz-minz)/grain
@@ -218,9 +296,9 @@ func main() {
 					}
 				}
 			}
-			minx, maxx = candidate.x-25*dx, candidate.x+25*dx
-			miny, maxy = candidate.y-25*dy, candidate.y+25*dy
-			minz, maxz = candidate.z-25*dz, candidate.z+25*dz
+			minx, maxx = candidate.x-33*dx, candidate.x+33*dx
+			miny, maxy = candidate.y-33*dy, candidate.y+33*dy
+			minz, maxz = candidate.z-33*dz, candidate.z+33*dz
 
 			fmt.Printf(" %d %d: grid lookup %v  best %d d=%d (%d,%d,%d)\n", j, i, candidate, best, dist(zero, candidate), dx, dy, dz)
 		}
@@ -279,5 +357,5 @@ func main() {
 	// 	}
 	// }
 
-	fmt.Printf("final candidate %v best %d, dist to zero %d\n", candidate, best, dist(candidate, zero))
+	//fmt.Printf("final candidate %v best %d, dist to zero %d\n", candidate, best, dist(candidate, zero))
 }
