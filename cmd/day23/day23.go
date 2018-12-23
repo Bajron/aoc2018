@@ -240,7 +240,7 @@ func main() {
 
 	//shortest := 4000000000
 	thePoint := zero
-
+	var meh Box
 	for _, pov := range bots {
 		//pov:=bots[ci]
 		sections := []*CrossBoxState{}
@@ -267,12 +267,139 @@ func main() {
 			}
 		}
 
+		meh = sections[0].box
 		for _, s := range sections {
 			fmt.Printf("Section size %d / dim %d  %v\n", s.crossedCount, s.box.Volume(), s.box)
 		}
 
 		fmt.Printf("\n")
 		// fmt.Printf("search is %d\n", whereTooLook.DimX()*whereTooLook.DimY()*whereTooLook.DimZ())
+	}
+
+	best := 0
+	candidate := Point{0, 0, 0}
+	minx, maxx := meh.xs, meh.xe
+	miny, maxy := meh.ys, meh.ye
+	minz, maxz := meh.zs, meh.ze
+
+	atLeastAprox := 0
+	for _, bot := range bots {
+		if len(bot.crossWith) >= 925 {
+			atLeastAprox++
+		}
+	}
+
+	fmt.Printf("limit set? %d\n", atLeastAprox)
+
+	grain := 50
+	around := 2 * grain / 5
+	for i := 0; i < 44; i++ {
+		dx, dy, dz := (maxx-minx)/grain, (maxy-miny)/grain, (maxz-minz)/grain
+
+		if dx <= 0 {
+			dx = 1
+		}
+		if dy <= 0 {
+			dy = 1
+		}
+		if dz <= 0 {
+			dz = 1
+		}
+
+		for x := minx; x < maxx; x += dx {
+			for y := miny; y < maxy; y += dy {
+				for z := minz; z < maxz; z += dz {
+					visible := 0
+					c := Point{x, y, z}
+					for _, b := range bots {
+						if dist(c, b.location) <= b.radius {
+							visible++
+						}
+					}
+					if visible > best || (visible == best && dist(c, zero) < dist(candidate, zero)) {
+						candidate = c
+						best = visible
+					}
+				}
+			}
+		}
+
+		minx, maxx = candidate.x-around*dx, candidate.x+around*dx
+		miny, maxy = candidate.y-around*dy, candidate.y+around*dy
+		minz, maxz = candidate.z-around*dz, candidate.z+around*dz
+
+		fmt.Printf("%d: grid lookup %v  best %d (%d,%d,%d)\n", i, candidate, best, dx, dy, dz)
+	}
+
+	fmt.Printf("grid lookup %v  best %d\n", candidate, best)
+
+	for j := 0; j < 5; j++ {
+		minx, maxx = candidate.x-1000000, candidate.x+1000000
+		miny, maxy = candidate.y-1000000, candidate.y+1000000
+		minz, maxz = candidate.z-1000000, candidate.z+1000000
+
+		for i := 0; i < 44; i++ {
+			dx, dy, dz := (maxx-minx)/grain, (maxy-miny)/grain, (maxz-minz)/grain
+
+			if dx <= 0 {
+				dx = 1
+			}
+			if dy <= 0 {
+				dy = 1
+			}
+			if dz <= 0 {
+				dz = 1
+			}
+
+			for x := minx; x < maxx; x += dx {
+				for y := miny; y < maxy; y += dy {
+					for z := minz; z < maxz; z += dz {
+						visible := 0
+						c := Point{x, y, z}
+						for _, b := range bots {
+							if dist(c, b.location) <= b.radius {
+								visible++
+							}
+						}
+						if visible > best || (visible == best && dist(c, zero) < dist(candidate, zero)) {
+							candidate = c
+							best = visible
+						}
+					}
+				}
+			}
+			minx, maxx = candidate.x-around*dx, candidate.x+around*dx
+			miny, maxy = candidate.y-around*dy, candidate.y+around*dy
+			minz, maxz = candidate.z-around*dz, candidate.z+around*dz
+
+			fmt.Printf(" %d %d: grid lookup %v  best %d d=%d (%d,%d,%d)\n", j, i, candidate, best, dist(zero, candidate), dx, dy, dz)
+		}
+	}
+
+	for {
+		nextCandidate := candidate
+		for x := candidate.x - 100; x < candidate.x+100; x++ {
+			for y := candidate.y - 100; y < candidate.y+100; y++ {
+				for z := candidate.z - 100; z < candidate.z+100; z++ {
+					visible := 0
+					c := Point{x, y, z}
+					for _, b := range bots {
+						if dist(c, b.location) <= b.radius {
+							visible++
+						}
+					}
+					if visible > best || (visible == best && dist(c, zero) < dist(candidate, zero)) {
+						nextCandidate = c
+						best = visible
+					}
+				}
+			}
+		}
+		if nextCandidate == candidate {
+			break
+		}
+		fmt.Printf("grid lookup refined %v  best %d dist %d\n", candidate, best, dist(zero, candidate))
+		candidate = nextCandidate
 	}
 
 	// for _, ci := range candidates {
