@@ -15,16 +15,25 @@ func (p Point) add(a Point) Point {
 	return Point{p.x + a.x, p.y + a.y, p.z + a.z}
 }
 
-type Bot struct {
-	location Point
-	radius   int
-}
-
 func abs(x int) int {
 	if x < 0 {
 		return -x
 	}
 	return x
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func dist(a, b Point) int {
@@ -40,7 +49,6 @@ func sign(x int) int {
 	}
 	return 0
 }
-
 func sortUnique(c []int) []int {
 	r := make([]int, 0, cap(c))
 	sort.Ints(c)
@@ -53,6 +61,59 @@ func sortUnique(c []int) []int {
 	return r
 }
 
+type Bot struct {
+	location                  Point
+	radius                    int
+	crossWith, sees, isSeenBy []*Bot
+}
+
+func NewBot(l Point, r int) *Bot {
+	return &Bot{l, r, []*Bot{}, []*Bot{}, []*Bot{}}
+}
+
+func (b Bot) GetBox() Box {
+	l, r := b.location, b.radius
+	if r < 0 {
+		panic("bad radius")
+	}
+	return Box{l.x - r, l.x + r, l.y - r, l.y + r, l.z - r, l.z + r}
+}
+
+type Box struct {
+	xs, xe, ys, ye, zs, ze int
+}
+
+func (b Box) DimX() int {
+	return b.xe - b.xs
+}
+
+func (b Box) DimY() int {
+	return b.ye - b.ys
+}
+func (b Box) DimZ() int {
+	return b.ze - b.zs
+}
+
+func (b Box) Volume() int {
+	return b.DimX() * b.DimY() * b.DimZ()
+}
+
+func (b Box) crossWith(a Box) Box {
+	return Box{max(b.xs, a.xs), min(b.xe, a.xe), max(b.ys, a.ys), min(b.ye, a.ye), max(b.zs, a.zs), min(b.ze, a.ze)}
+}
+func (b Box) isValid() bool {
+	return b.xs <= b.xe && b.ys <= b.ye && b.zs <= b.ze
+}
+
+type BotSet struct {
+	bots []*Bot
+}
+
+type CrossBoxState struct {
+	box          Box
+	crossedCount int
+}
+
 func main() {
 	stderr := bufio.NewWriter(os.Stderr)
 	stdout := bufio.NewWriter(os.Stdout)
@@ -61,12 +122,12 @@ func main() {
 
 	stdin := bufio.NewReader(os.Stdin)
 
-	bots := []Bot{}
+	bots := []*Bot{}
 
 	var x, y, z, r int
 	read, error := fmt.Fscanf(stdin, "pos=<%d,%d,%d>, r=%d\n", &x, &y, &z, &r)
 	if read == 4 && error == nil {
-		bots = append(bots, Bot{Point{x, y, z}, r})
+		bots = append(bots, NewBot(Point{x, y, z}, r))
 	} else {
 		fmt.Fprintf(stderr, "Read %d, error: %s\n", read, error)
 	}
@@ -74,7 +135,7 @@ func main() {
 	for error == nil {
 		read, error = fmt.Fscanf(stdin, "pos=<%d,%d,%d>, r=%d\n", &x, &y, &z, &r)
 		if read == 4 && error == nil {
-			bots = append(bots, Bot{Point{x, y, z}, r})
+			bots = append(bots, NewBot(Point{x, y, z}, r))
 		} else {
 			fmt.Fprintf(stderr, "Read %d, error: %s\n", read, error)
 		}
@@ -99,6 +160,7 @@ func main() {
 	}
 
 	fmt.Printf("in range %d\n", inRange)
+
 	beacon := -1
 	beaconVisible := 0
 	for bi, bref := range bots {
@@ -106,6 +168,7 @@ func main() {
 		for _, b := range bots {
 			if dist(bref.location, b.location) <= bref.radius {
 				visible++
+				bref.sees = append(bref.sees, b)
 			}
 		}
 		if visible > beaconVisible {
@@ -122,6 +185,7 @@ func main() {
 		for _, b := range bots {
 			if dist(bref.location, b.location) <= b.radius {
 				visible++
+				bref.isSeenBy = append(bref.isSeenBy, b)
 			}
 		}
 		if visible > receiverVisible {
@@ -138,202 +202,115 @@ func main() {
 		for _, b := range bots {
 			if dist(bref.location, b.location) <= b.radius+bref.radius {
 				crossings++
+				bref.crossWith = append(bref.crossWith, b)
 			}
 		}
 		if crossings > crossingCount {
 			crossingCount = crossings
 			crosser = bi
 		}
-		fmt.Printf("%d is crosses with by %d\n", bi, crossings)
+		fmt.Printf("%d crosses with %d\n", bi, crossings)
 	}
 
-	fmt.Printf("best beacon %v at index %d best %d\n", bots[beacon], beacon, beaconVisible)
-	fmt.Printf("best receiver %v at index %d best %d\n", bots[receiver], receiver, receiverVisible)
-	fmt.Printf("best crosser %v at index %d best %d\n", bots[crosser], crosser, crossingCount)
+	fmt.Printf("best beacon %v at index %d best %d\n", bots[beacon].location, beacon, beaconVisible)
+	fmt.Printf("best receiver %v at index %d best %d\n", bots[receiver].location, receiver, receiverVisible)
+	fmt.Printf("best crosser %v at index %d best %d\n", bots[crosser].location, crosser, crossingCount)
 
-	minx, maxx, miny, maxy, minz, maxz := 2000000000, -2000000000, 2000000000, -2000000000, 2000000000, -2000000000
-	for _, b := range bots {
-		if b.location.x < minx {
-			minx = b.location.x
+	candidates := []int{}
+	crossersOfCandidates := map[int][]int{}
+
+	for bi, bref := range bots {
+		crossings := 0
+		crossers := []int{}
+		for ci, b := range bots {
+			if dist(bref.location, b.location) <= b.radius+bref.radius {
+				crossings++
+				crossers = append(crossers, ci)
+			}
 		}
-		if b.location.x > maxx {
-			maxx = b.location.x
-		}
-		if b.location.y < miny {
-			miny = b.location.y
-		}
-		if b.location.y > maxy {
-			maxy = b.location.y
-		}
-		if b.location.z < minz {
-			minz = b.location.z
-		}
-		if b.location.z > maxz {
-			maxz = b.location.z
+		if crossings == crossingCount {
+			candidates = append(candidates, bi)
+			crossersOfCandidates[bi] = crossers
 		}
 	}
+
+	fmt.Printf("candidates %v len:%d\n", candidates, len(candidates))
 
 	zero := Point{0, 0, 0}
 
-	best := 0
-	candidate := Point{0, 0, 0}
+	//shortest := 4000000000
+	thePoint := zero
 
-	interesting := []Point{}
-
-	interestingX := []int{}
-	interestingY := []int{}
-	interestingZ := []int{}
-	for _, b := range bots {
-		interestingX = append(interestingX, b.location.x, b.location.x-b.radius, b.location.x+b.radius)
-		interestingY = append(interestingY, b.location.y, b.location.y-b.radius, b.location.y+b.radius)
-		interestingZ = append(interestingZ, b.location.z, b.location.z-b.radius, b.location.z+b.radius)
-
-		interesting = append(interesting, b.location)
-		interesting = append(interesting, b.location.add(Point{1, 0, 0}))
-		interesting = append(interesting, b.location.add(Point{-1, 0, 0}))
-		interesting = append(interesting, b.location.add(Point{0, 1, 0}))
-		interesting = append(interesting, b.location.add(Point{0, -1, 0}))
-		interesting = append(interesting, b.location.add(Point{0, 0, 1}))
-		interesting = append(interesting, b.location.add(Point{0, 0, -1}))
-	}
-	interestingX = sortUnique(interestingX)
-	interestingY = sortUnique(interestingY)
-	interestingZ = sortUnique(interestingZ)
-
-	fmt.Printf("eh %d %d %d\n", len(interestingX), len(interestingY), len(interestingZ))
-
-	for _, c := range interesting {
-		visible := 0
-		for _, b := range bots {
-			if dist(c, b.location) <= b.radius {
-				visible++
+	for _, pov := range bots {
+		//pov:=bots[ci]
+		sections := []*CrossBoxState{}
+		for _, crosser := range pov.crossWith {
+			cbox := crosser.GetBox()
+			if !cbox.isValid() {
+				panic("wt...")
 			}
-		}
-		if visible > best || (visible == best && dist(c, zero) < dist(candidate, zero)) {
-			candidate = c
-			best = visible
-
-			fmt.Printf("something %v  best %d \n", candidate, best)
-		}
-
-	}
-
-	best = 0
-	candidate = Point{0, 0, 0}
-
-	grain := 100
-	for i := 0; i < 20; i++ {
-		dx, dy, dz := (maxx-minx)/grain, (maxy-miny)/grain, (maxz-minz)/grain
-
-		if dx <= 0 {
-			dx = 1
-		}
-		if dy <= 0 {
-			dy = 1
-		}
-		if dz <= 0 {
-			dz = 1
-		}
-
-		for x := minx; x < maxx; x += dx {
-			for y := miny; y < maxy; y += dy {
-				for z := minz; z < maxz; z += dz {
-					visible := 0
-					c := Point{x, y, z}
-					for _, b := range bots {
-						if dist(c, b.location) <= b.radius {
-							visible++
-						}
-					}
-					if visible > best || (visible == best && dist(c, zero) < dist(candidate, zero)) {
-						candidate = c
-						best = visible
-					}
+			crossedCount := 0
+			for _, state := range sections {
+				crossed := state.box.crossWith(cbox)
+				if crossed.isValid() {
+					crossedCount++
+					state.box = crossed
+					state.crossedCount++
 				}
 			}
-		}
-		minx, maxx = candidate.x-33*dx, candidate.x+33*dx
-		miny, maxy = candidate.y-33*dy, candidate.y+33*dy
-		minz, maxz = candidate.z-33*dz, candidate.z+33*dz
-
-		fmt.Printf("%d: grid lookup %v  best %d (%d,%d,%d)\n", i, candidate, best, dx, dy, dz)
-	}
-
-	fmt.Printf("grid lookup %v  best %d\n", candidate, best)
-
-	for j := 0; j < 10; j++ {
-		minx, maxx = candidate.x-150000, candidate.x+150000
-		miny, maxy = candidate.y-150000, candidate.y+150000
-		minz, maxz = candidate.z-150000, candidate.z+150000
-
-		for i := 0; i < 20; i++ {
-			dx, dy, dz := (maxx-minx)/grain, (maxy-miny)/grain, (maxz-minz)/grain
-
-			if dx <= 0 {
-				dx = 1
-			}
-			if dy <= 0 {
-				dy = 1
-			}
-			if dz <= 0 {
-				dz = 1
-			}
-
-			for x := minx; x < maxx; x += dx {
-				for y := miny; y < maxy; y += dy {
-					for z := minz; z < maxz; z += dz {
-						visible := 0
-						c := Point{x, y, z}
-						for _, b := range bots {
-							if dist(c, b.location) <= b.radius {
-								visible++
-							}
-						}
-						if visible > best || (visible == best && dist(c, zero) < dist(candidate, zero)) {
-							candidate = c
-							best = visible
-						}
-					}
+			if crossedCount == 0 {
+				newBox := pov.GetBox().crossWith(cbox)
+				if !newBox.isValid() {
+					panic("nope this is bad")
 				}
-			}
-			minx, maxx = candidate.x-33*dx, candidate.x+33*dx
-			miny, maxy = candidate.y-33*dy, candidate.y+33*dy
-			minz, maxz = candidate.z-33*dz, candidate.z+33*dz
-
-			fmt.Printf(" %d %d: grid lookup %v  best %d d=%d (%d,%d,%d)\n", j, i, candidate, best, dist(zero, candidate), dx, dy, dz)
-		}
-	}
-
-	for {
-		nextCandidate := candidate
-		for x := candidate.x - 100; x < candidate.x+100; x++ {
-			for y := candidate.y - 100; y < candidate.y+100; y++ {
-				for z := candidate.z - 100; z < candidate.z+100; z++ {
-					visible := 0
-					c := Point{x, y, z}
-					for _, b := range bots {
-						if dist(c, b.location) <= b.radius {
-							visible++
-						}
-					}
-					if visible > best || (visible == best && dist(c, zero) < dist(candidate, zero)) {
-						nextCandidate = c
-						best = visible
-					}
-				}
+				sections = append(sections, &CrossBoxState{newBox, 0})
 			}
 		}
-		if nextCandidate == candidate {
-			break
+
+		for _, s := range sections {
+			fmt.Printf("Section size %d / dim %d  %v\n", s.crossedCount, s.box.Volume(), s.box)
 		}
-		fmt.Printf("grid lookup refined %v  best %d dist %d\n", candidate, best, dist(zero, candidate))
-		candidate = nextCandidate
+
+		fmt.Printf("\n")
+		// fmt.Printf("search is %d\n", whereTooLook.DimX()*whereTooLook.DimY()*whereTooLook.DimZ())
 	}
 
-	// bot := bots[receiver]
-	// candidate = bot.location
-	// best = 0
-	// fmt.Printf("candidate %v  best %d\n", candidate, best)
+	// for _, ci := range candidates {
+	// 	bot1 := bots[ci]
+
+	// 	for _, cj := range candidates {
+	// 		bot2 := bots[cj]
+
+	// 		from := bot1.location
+	// 		to := bot2.location
+
+	// 	topLoop:
+	// 		for x := from.x; abs(from.x-x) < bot1.radius && to.x != from.x; x += sign(to.x - from.x) {
+	// 			for y := from.y; abs(from.x-x)+abs(from.y-y) < bot1.radius && to.y != from.y; y += sign(to.y - from.y) {
+	// 				for z := from.z; abs(from.x-x)+abs(from.y-y)+abs(from.z-z) < bot1.radius && to.z != from.z; z += sign(to.z - from.z) {
+	// 					p := Point{x, y, z}
+	// 					if dist(p, to) <= bot2.radius {
+
+	// 						visible := 0
+	// 						for _, b := range bots {
+	// 							if dist(b.location, p) <= b.radius {
+	// 								visible++
+	// 							}
+	// 						}
+
+	// 						fmt.Printf(" %d vs %d; cross at %v has %d visible\n", ci, cj, p, visible)
+	// 						if visible == crossingCount {
+	// 							break topLoop
+	// 						}
+	// 					}
+	// 				}
+	// 			}
+	// 		}
+
+	// 	}
+	// }
+
+	// fmt.Printf("final candidate %v , dist to zero %d\n", thePoint, dist(thePoint, zero))
 
 	// for x := bot.location.x - bot.radius; x <= bot.location.x+bot.radius; x++ {
 	// 	eatenByX := abs(bot.location.x - x)
@@ -341,21 +318,19 @@ func main() {
 	// 	for y := bot.location.y - leftForY; y <= bot.location.y+leftForY; y++ {
 	// 		eatenByXY := eatenByX + abs(bot.location.y-y)
 	// 		leftForZ := bot.radius - eatenByXY
-	// 		for z := bot.location.z - leftForZ; y <= bot.location.z+leftForZ; z++ {
-	// 			c := Point{x, y, z}
-	// 			visible := 0
-	// 			for _, b := range bots {
-	// 				if dist(c, b.location) <= b.radius {
-	// 					visible++
-	// 				}
+
+	// 		c := Point{x, y, leftForZ}
+	// 		visible := 0
+	// 		for _, b := range bots {
+	// 			if dist(c, b.location) <= b.radius {
+	// 				visible++
 	// 			}
-	// 			if visible > best || (visible == best && dist(c, zero) < dist(candidate, zero)) {
-	// 				candidate = c
-	// 				best = visible
-	// 			}
+	// 		}
+	// 		if visible == crossingCount && dist(c, zero) < dist(thePoint, zero) {
+	// 			thePoint = c
 	// 		}
 	// 	}
 	// }
 
-	//fmt.Printf("final candidate %v best %d, dist to zero %d\n", candidate, best, dist(candidate, zero))
+	fmt.Printf("final candidate %v , dist to zero %d\n", thePoint, dist(thePoint, zero))
 }
