@@ -41,9 +41,10 @@ func (a Army) wouldDeal(b Army) int {
 	return base
 }
 
-func (a *Army) takeDamage(d int) {
+func (a *Army) takeDamage(d int) int {
 	kills := d / a.hppu
 	a.units -= kills
+	return kills
 }
 
 func readArmy(fraction int, re *regexp.Regexp, reader *bufio.Reader, log io.Writer) []Army {
@@ -147,14 +148,6 @@ func main() {
 	fmt.Printf("%v %v\n", immune, infection)
 
 	units := []*Army{}
-	for k := range immune {
-		units = append(units, &immune[k])
-	}
-	for k := range infection {
-		units = append(units, &infection[k])
-	}
-
-	fmt.Printf("Total armies: %d\n", len(units))
 
 	targetingOrder := func(lhs, rhs *Army) bool {
 		return lhs.effectivePower() > rhs.effectivePower() || (lhs.effectivePower() == rhs.effectivePower() && lhs.initiative > rhs.initiative)
@@ -163,85 +156,111 @@ func main() {
 		return lhs.initiative > rhs.initiative
 	}
 
-	immuneCount, infectionCount := len(immune), len(infection)
+	boost := 1
+	for {
+		immuneCount, infectionCount := len(immune), len(infection)
 
-	for immuneCount > 0 && infectionCount > 0 {
-		immuneCount, infectionCount = 0, 0
+		units = units[:0]
+		boosted := make([]Army, len(immune))
+		copy(boosted, immune)
+		infectionCopy := make([]Army, len(infection))
+		copy(infectionCopy, infection)
 
-		for i := range units {
-			u := units[i]
-			u.attacks = nil
-			u.attackedBy = nil
+		fmt.Printf("boost %d\n", boost)
 
-			if u.units <= 0 {
-				continue
-			}
-			if u.fraction == 0 {
-				immuneCount++
-				fmt.Printf("Immune group %d has %d units\n", u.id, u.units)
-			}
-			if u.fraction == 1 {
-				infectionCount++
-				fmt.Printf("Infection group %d has %d units\n", u.id, u.units)
-			}
+		for k := range boosted {
+			boosted[k].damage += boost
+			units = append(units, &boosted[k])
 		}
+		for k := range infectionCopy {
+			units = append(units, &infectionCopy[k])
+		}
+		fmt.Printf("Total armies: %d\n", len(units))
 
-		By(targetingOrder).Sort(units)
-		for i := range units {
-			attacker := units[i]
-			if attacker.units <= 0 {
-				continue
-			}
+		for immuneCount > 0 && infectionCount > 0 {
+			immuneCount, infectionCount = 0, 0
 
-			fmt.Printf("Attacker %v\n", *attacker)
+			for i := range units {
+				u := units[i]
+				u.attacks = nil
+				u.attackedBy = nil
 
-			choice := -1
-			deals := 0
-			for j := range units {
-				c := units[j]
-				if i == j || attacker.fraction == c.fraction || c.units <= 0 || c.attackedBy != nil {
+				if u.units <= 0 {
 					continue
 				}
-				d := attacker.wouldDeal(*c)
-				fmt.Printf("?? Fraction %d, id %d would deal %d to f:%d id:%d\n",
-					attacker.fraction, attacker.id, d, c.fraction, c.id)
+				if u.fraction == 0 {
+					immuneCount++
+					// fmt.Printf("Immune group %d has %d units\n", u.id, u.units)
+				}
+				if u.fraction == 1 {
+					infectionCount++
+					// fmt.Printf("Infection group %d has %d units\n", u.id, u.units)
+				}
+			}
 
-				if d == 0 {
+			By(targetingOrder).Sort(units)
+			for i := range units {
+				attacker := units[i]
+				if attacker.units <= 0 {
 					continue
 				}
 
-				if choice < 0 || d > deals ||
-					(d == deals && c.effectivePower() > units[choice].effectivePower()) ||
-					(d == deals && c.effectivePower() == units[choice].effectivePower() && c.initiative > units[choice].initiative) {
-					deals = d
-					choice = j
+				// fmt.Printf("Attacker %v\n", *attacker)
+
+				choice := -1
+				deals := 0
+				for j := range units {
+					c := units[j]
+					if i == j || attacker.fraction == c.fraction || c.units <= 0 || c.attackedBy != nil {
+						continue
+					}
+					d := attacker.wouldDeal(*c)
+					if d == 0 {
+						continue
+					}
+
+					if choice < 0 || d > deals ||
+						(d == deals && c.effectivePower() > units[choice].effectivePower()) ||
+						(d == deals && c.effectivePower() == units[choice].effectivePower() && c.initiative > units[choice].initiative) {
+						deals = d
+						choice = j
+					}
+				}
+				if choice >= 0 {
+					attacker.attacks = units[choice]
+					units[choice].attackedBy = attacker
+
+					// fmt.Printf("Fraction %d, id %d would deal %d to f:%d id:%d\n",
+					// 	attacker.fraction, attacker.id, deals, units[choice].fraction, units[choice].id)
 				}
 			}
-			if choice >= 0 {
-				attacker.attacks = units[choice]
-				units[choice].attackedBy = attacker
+			//fmt.Printf(" -- attack phase --\n")
+			totalKills := 0
+			By(initiativeOrder).Sort(units)
+			for i := range units {
+				attacker := units[i]
+				if attacker.units <= 0 || attacker.attacks == nil {
+					continue
+				}
 
-				fmt.Printf("Fraction %d, id %d would deal %d to f:%d id:%d\n",
-					attacker.fraction, attacker.id, deals, units[choice].fraction, units[choice].id)
-			}
-		}
-		fmt.Printf(" -- attack phase --\n")
-		By(initiativeOrder).Sort(units)
-		for i := range units {
-			attacker := units[i]
-			if attacker.units <= 0 || attacker.attacks == nil {
-				continue
+				victim := attacker.attacks
+				dmg := attacker.wouldDeal(*victim)
+				totalKills += victim.takeDamage(dmg)
 			}
 
-			victim := attacker.attacks
-			dmg := attacker.wouldDeal(*victim)
-			victim.takeDamage(dmg)
+			if totalKills == 0 {
+				break
+			}
+			//fmt.Printf("\n")
 		}
 
-		fmt.Printf("\n")
+		fmt.Printf("immune: %d infection: %d\n", immuneCount, infectionCount)
+
+		if immuneCount > 0 && infectionCount == 0 {
+			break
+		}
+		boost++
 	}
-
-	fmt.Printf("immune: %d infection: %d\n", immuneCount, infectionCount)
 
 	immuneUnits, infectionUnits := 0, 0
 	for i := range units {
